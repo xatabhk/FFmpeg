@@ -307,6 +307,12 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_CAVS:
         stream_type = STREAM_TYPE_VIDEO_CAVS;
         break;
+    case AV_CODEC_ID_AVS2:
+        stream_type = STREAM_TYPE_VIDEO_AVS2;
+        break;
+    case AV_CODEC_ID_AVS3:
+        stream_type = STREAM_TYPE_VIDEO_AVS3;
+        break;
     case AV_CODEC_ID_DIRAC:
         stream_type = STREAM_TYPE_VIDEO_DIRAC;
         break;
@@ -392,6 +398,15 @@ static int get_m2ts_stream_type(AVFormatContext *s, AVStream *st)
         break;
     case AV_CODEC_ID_HEVC:
         stream_type = STREAM_TYPE_VIDEO_HEVC;
+        break;
+    case AV_CODEC_ID_CAVS:
+        stream_type = STREAM_TYPE_VIDEO_CAVS;
+        break;
+    case AV_CODEC_ID_AVS2:
+        stream_type = STREAM_TYPE_VIDEO_AVS2;
+        break;
+    case AV_CODEC_ID_AVS3:
+        stream_type = STREAM_TYPE_VIDEO_AVS3;
         break;
     case AV_CODEC_ID_PCM_BLURAY:
         stream_type = 0x80;
@@ -719,6 +734,9 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
                 put_registration_descriptor(&q, MKTAG('d', 'r', 'a', 'c'));
             } else if (stream_type == STREAM_TYPE_VIDEO_VC1) {
                 put_registration_descriptor(&q, MKTAG('V', 'C', '-', '1'));
+            } else if (stream_type == STREAM_TYPE_VIDEO_CAVS || stream_type == STREAM_TYPE_VIDEO_AVS2 ||
+                       stream_type == STREAM_TYPE_VIDEO_AVS3) {
+                put_registration_descriptor(&q, MKTAG('A', 'V', 'S', 'V'));
             } else if (stream_type == STREAM_TYPE_VIDEO_HEVC && s->strict_std_compliance <= FF_COMPLIANCE_NORMAL) {
                 put_registration_descriptor(&q, MKTAG('H', 'E', 'V', 'C'));
             }
@@ -1730,6 +1748,32 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
             data[5] = 0xf0; // any slice type (0xe) + rbsp stop one bit
             buf     = data;
             size    = pkt->size + 6 + extradd;
+        }
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_AVS2 ||st->codecpar->codec_id == AV_CODEC_ID_AVS3) {
+        const uint8_t *p = buf, *buf_end = p + size;
+        uint32_t state = -1;
+
+        if (pkt->size < 4) {
+            av_log(s, AV_LOG_ERROR, "Invalid AVS2 or AVS3 packet: size = %d\n", pkt->size);
+            return AVERROR_INVALIDDATA;
+        }
+
+        do {
+            p = avpriv_find_start_code(p, buf_end, &state);
+            av_log(s, AV_LOG_TRACE, "nal %"PRIx32"\n", state & 0xff);
+        } while (p < buf_end && ((state & 0xff) != 0xb0)
+                             && ((state & 0xff) != 0xb1)
+                             && ((state & 0xff) != 0xb3)
+                             && ((state & 0xff) != 0xb6));
+
+        if ((state & 0xff) == 0xb0 || (state & 0xff) == 0xb3 || (state & 0xff) == 0xb6) {
+            data = av_malloc(pkt->size);
+            if (!data)
+                return AVERROR(ENOMEM);
+
+            memcpy(data, pkt->data, pkt->size);
+            buf     = data;
+            size    = pkt->size;
         }
     } else if (st->codecpar->codec_id == AV_CODEC_ID_AAC) {
         if (pkt->size < 2) {

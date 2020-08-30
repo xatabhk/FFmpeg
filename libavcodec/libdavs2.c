@@ -44,7 +44,9 @@ static av_cold int davs2_init(AVCodecContext *avctx)
 
     /* init the decoder */
     cad->param.threads      = avctx->thread_count;
-    cad->param.info_level   = 0;
+    cad->param.info_level   = av_log_get_level() > AV_LOG_INFO
+                                                 ? DAVS2_LOG_DEBUG
+                                                 : DAVS2_LOG_WARNING;
     cad->param.disable_avx  = !(cpu_flags & AV_CPU_FLAG_AVX &&
                                 cpu_flags & AV_CPU_FLAG_AVX2);
     cad->decoder            = davs2_decoder_open(&cad->param);
@@ -58,13 +60,24 @@ static av_cold int davs2_init(AVCodecContext *avctx)
     return 0;
 }
 
+static void davs2_frame_unref(void *opaque, uint8_t *data) {
+    DAVS2Context    *cad = (DAVS2Context *)opaque;
+    davs2_picture_t  pic;
+
+    pic.magic = (davs2_picture_t *)data;
+
+    if (cad->decoder) {
+        davs2_decoder_frame_unref(cad->decoder, &pic);
+    } else {
+        av_log(NULL, AV_LOG_WARNING, "Decoder not found, frame unreference failed.\n");
+    }
+}
+
 static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic, int *got_frame,
                              davs2_seq_info_t *headerset, int ret_type, AVFrame *frame)
 {
     DAVS2Context *cad    = avctx->priv_data;
-    int bytes_per_sample = pic->bytes_per_sample;
-    int plane = 0;
-    int line  = 0;
+    int plane;
 
     if (!headerset) {
         *got_frame = 0;
@@ -102,30 +115,42 @@ static int davs2_dump_frames(AVCodecContext *avctx, davs2_picture_t *pic, int *g
         return AVERROR_EXTERNAL;
     }
 
-    for (plane = 0; plane < 3; ++plane) {
-        int size_line = pic->widths[plane] * bytes_per_sample;
-        frame->buf[plane]  = av_buffer_alloc(size_line * pic->lines[plane]);
-
-        if (!frame->buf[plane]){
-            av_log(avctx, AV_LOG_ERROR, "Decoder error: allocation failure, can't dump frames.\n");
-            return AVERROR(ENOMEM);
-        }
-
-        frame->data[plane]     = frame->buf[plane]->data;
-        frame->linesize[plane] = size_line;
-
-        for (line = 0; line < pic->lines[plane]; ++line)
-            memcpy(frame->data[plane] + line * size_line,
-                   pic->planes[plane] + line * pic->strides[plane],
-                   pic->widths[plane] * bytes_per_sample);
-    }
-
     frame->width     = cad->headerset.width;
     frame->height    = cad->headerset.height;
     frame->pts       = cad->out_frame.pts;
     frame->format    = avctx->pix_fmt;
 
+    /* handle the actual picture in magic */
+    frame->buf[0]    = av_buffer_create((uint8_t *)pic->magic,
+                                        sizeof(davs2_picture_t *),
+                                        davs2_frame_unref,
+                                        (void *)cad,
+                                        AV_BUFFER_FLAG_READONLY);
+    if (!frame->buf[0]) {
+        av_log(avctx, AV_LOG_ERROR,
+            "Decoder error: allocation failure, can't dump frames.\n");
+        return AVERROR(ENOMEM);
+    }
+
+    for (plane = 0; plane < 3; ++plane) {
+        frame->linesize[plane] = pic->strides[plane];
+        frame->data[plane] = pic->planes[plane];
+    }
+
     *got_frame = 1;
+    return 0;
+}
+
+static av_cold int davs2_end(AVCodecContext *avctx)
+{
+    DAVS2Context *cad = avctx->priv_data;
+
+    /* close the decoder */
+    if (cad->decoder) {
+        davs2_decoder_close(cad->decoder);
+        cad->decoder = NULL;
+    }
+
     return 0;
 }
 
@@ -156,22 +181,8 @@ static int send_delayed_frame(AVCodecContext *avctx, AVFrame *frame, int *got_fr
     }
     if (ret == DAVS2_GOT_FRAME) {
         ret = davs2_dump_frames(avctx, &cad->out_frame, got_frame, &cad->headerset, ret, frame);
-        davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
     }
     return ret;
-}
-
-static av_cold int davs2_end(AVCodecContext *avctx)
-{
-    DAVS2Context *cad = avctx->priv_data;
-
-    /* close the decoder */
-    if (cad->decoder) {
-        davs2_decoder_close(cad->decoder);
-        cad->decoder = NULL;
-    }
-
-    return 0;
 }
 
 static int davs2_decode_frame(AVCodecContext *avctx, void *data,
@@ -205,7 +216,6 @@ static int davs2_decode_frame(AVCodecContext *avctx, void *data,
 
     if (ret != DAVS2_DEFAULT) {
         ret = davs2_dump_frames(avctx, &cad->out_frame, got_frame, &cad->headerset, ret, frame);
-        davs2_decoder_frame_unref(cad->decoder, &cad->out_frame);
     }
 
     return ret == 0 ? buf_size : ret;
@@ -221,8 +231,8 @@ AVCodec ff_libdavs2_decoder = {
     .close          = davs2_end,
     .decode         = davs2_decode_frame,
     .flush          = davs2_flush,
-    .capabilities   =  AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AUTO_THREADS,
-    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
+    .capabilities   = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AUTO_THREADS,
+    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV420P10,
                                                      AV_PIX_FMT_NONE },
     .wrapper_name   = "libdavs2",
 };
