@@ -10234,6 +10234,12 @@ drawtext='fontfile=Linux Libertine O-40\:style=Semibold:text=FFmpeg'
 @end example
 
 @item
+Draw "Test Text" with font size dependent on height of the video.
+@example
+drawtext="text='Test Text': fontsize=h/30: x=(w-text_w)/2: y=(h-text_h*2)"
+@end example
+
+@item
 Print the date of a real-time encoding (see strftime(3)):
 @example
 drawtext='fontfile=FreeSans.ttf:text=%@{localtime\:%a %b %d %Y@}'
@@ -11936,6 +11942,9 @@ Display video size or number of audio channels in case of audio used by filter l
 
 @item rate
 Display video frame rate or sample rate in case of audio used by filter link.
+
+@item eof
+Display link output status.
 @end table
 
 @item rate, r
@@ -22569,6 +22578,17 @@ Set number of colors to use at once. Allowed range is from 2 to 8. Default value
 
 @item seed
 Set seed for picking gradient line points.
+
+@item duration, d
+Set the duration of the sourced video. See
+@ref{time duration syntax,,the Time duration section in the ffmpeg-utils(1) manual,ffmpeg-utils}
+for the accepted syntax.
+
+If not specified, or the expressed duration is negative, the video is
+supposed to be generated forever.
+
+@item speed
+Set speed of gradients rotation.
 @end table
 
 

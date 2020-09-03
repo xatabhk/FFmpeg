@@ -636,6 +636,15 @@ static int FUNC(tile_info)(CodedBitstreamContext *ctx, RWContext *rw,
             current->tile_rows_log2;
         current->tile_rows = (sb_rows + tile_height_sb - 1) / tile_height_sb;
 
+        for (i = 0; i < current->tile_cols - 1; i++)
+            infer(width_in_sbs_minus_1[i], tile_width_sb - 1);
+        infer(width_in_sbs_minus_1[i],
+              sb_cols - (current->tile_cols - 1) * tile_width_sb - 1);
+        for (i = 0; i < current->tile_rows - 1; i++)
+            infer(height_in_sbs_minus_1[i], tile_height_sb - 1);
+        infer(height_in_sbs_minus_1[i],
+              sb_rows - (current->tile_rows - 1) * tile_height_sb - 1);
+
     } else {
         int widest_tile_sb, start_sb, size_sb, max_width, max_height;
 
@@ -931,7 +940,7 @@ static int FUNC(lr_params)(CodedBitstreamContext *ctx, RWContext *rw,
     for (i = 0; i < priv->num_planes; i++) {
         fbs(2, lr_type[i], 1, i);
 
-        if (current->lr_type[i] != 0) {
+        if (current->lr_type[i] != AV1_RESTORE_NONE) {
             uses_lr = 1;
             if (i > 0)
                 uses_chroma_lr = 1;
