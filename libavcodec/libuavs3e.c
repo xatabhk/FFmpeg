@@ -153,8 +153,10 @@ static void __imgb_cpy_plane(void *src, void *dst, int bw, int h, int s_src, int
 
 static void uavs3e_image_copy_pic(void *dst[4], int i_dst[4], unsigned char *const src[4], const int i_src[4],  enum AVPixelFormat pix_fmts, int width, int height)
 {
+#if (BIT_DEPTH == 10)	
     if(pix_fmts==AV_PIX_FMT_YUV420P10LE)
 	width<<=1;
+#endif
 
     __imgb_cpy_plane(src[0], dst[0], width,      height,      i_src[0], i_dst[0]);
     __imgb_cpy_plane(src[1], dst[1], width >> 1, height >> 1, i_src[1], i_dst[1]);
