@@ -103,6 +103,8 @@ static int uavs3e_init(AVCodecContext *avctx)
         return -1;
     }
 
+    av_log(NULL, AV_LOG_INFO, "Internal depth: %d  input depth %d\n", ec->avs3_cfg.bit_depth_internal, ec->avs3_cfg.bit_depth_input);
+
     ec->avs3_cfg.horizontal_size    = avctx->coded_width;
     ec->avs3_cfg.vertical_size      = avctx->coded_height;
     ec->avs3_cfg.fps_num            = avctx->time_base.den;
@@ -153,14 +155,31 @@ static void __imgb_cpy_plane(void *src, void *dst, int bw, int h, int s_src, int
 
 static void uavs3e_image_copy_pic(void *dst[4], int i_dst[4], unsigned char *const src[4], const int i_src[4],  enum AVPixelFormat pix_fmts, int width, int height)
 {
-#if (BIT_DEPTH == 10)	
-    if(pix_fmts==AV_PIX_FMT_YUV420P10LE)
-	width<<=1;
-#endif
+    if(sizeof(pel)>1 && pix_fmts==AV_PIX_FMT_YUV420P){    //sizeof(pel)==2 when BIT_DEPTH == 10
+        //Expand YUV420P to 2-byte
+	for(int plane=0;plane<3;plane++){
+            int planeheight=(plane==0)?height:height>>1;
+            int planewidth=(plane==0)?width:width>>1;
 
-    __imgb_cpy_plane(src[0], dst[0], width,      height,      i_src[0], i_dst[0]);
-    __imgb_cpy_plane(src[1], dst[1], width >> 1, height >> 1, i_src[1], i_dst[1]);
-    __imgb_cpy_plane(src[2], dst[2], width >> 1, height >> 1, i_src[2], i_dst[2]);
+            pel *dstpel = (pel *)dst[plane];
+            int ind_src = 0;
+            int ind_dst = 0;
+
+            for (int y = 0; y < planeheight; y++) {
+               for (int x = 0; x < planewidth; x++) {
+                   dstpel[ind_dst + x] = src[plane][ind_src + x];    //byte to short
+               }//for (int x = 0; x < planewidth; x++)
+               ind_src += i_src[plane];
+               ind_dst += (i_dst[plane]>>1);
+            }//for (int y = 0; y < planeheight; y++)
+        }//for(int plane=0;plane<3;plane++)
+    }
+    else{
+        width=(sizeof(pel)>1)?width<<1:width;
+        __imgb_cpy_plane(src[0], dst[0], width,      height,      i_src[0], i_dst[0]);
+        __imgb_cpy_plane(src[1], dst[1], width >> 1, height >> 1, i_src[1], i_dst[1]);
+        __imgb_cpy_plane(src[2], dst[2], width >> 1, height >> 1, i_src[2], i_dst[2]);
+    }
 }
 
 static int uavs3e_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
